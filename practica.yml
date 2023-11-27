@@ -1,0 +1,137 @@
+---
+- name: Practica de Laboratorio
+  gather_facts: true
+  hosts: all
+  become: true
+  tasks:
+    - name: Instalar mysql server, pip y phpmysqli
+      apt:
+        name: "mysql-server, pip, php-mysqli"
+
+    - name: Instalar PyMySQL
+      pip:
+        name: pymysql
+        state: present
+        executable: pip3
+
+    - name: Iniciar mysql
+      shell: systemctl start mysql
+
+    - name: Instalar modulo libapache2-mod-php
+      apt:
+        name: libapache2-mod-php
+
+    - name: Instalar apache2 y php
+      apt:
+        name: "apache2, php"
+
+    # Importar la base de datos a mysql
+    - name: Ejecutar archivo .sql en mysql
+      ignore_errors: yes
+      mysql_db:
+        name: residencias
+        state: import
+        target: /home/devasc/Downloads/TallerBaseDatos/residencias.sql
+        login_user: "root"
+        login_password: 1234
+        login_unix_socket: null
+
+    # Configuración de la página web en la ruta default
+    - name: Configurar IP en apache
+      lineinfile:
+        path: /etc/apache2/sites-available/000-default.conf
+        line: 'ServerName 192.168.1.10'
+        regexp: '^ServerName'
+
+    - name: Escribir configuración en el archivo
+      copy:
+        dest: /etc/apache2/sites-available/000-default.conf
+        content: |
+          <VirtualHost *:80>
+            ServerName www.irojas.com
+            ServerAlias www.irojas.com
+            DocumentRoot /var/www/html
+            ErrorLog ${APACHE_LOG_DIR}/error.log
+            CustomLog ${APACHE_LOG_DIR}/access.log combined
+          </VirtualHost>
+
+    - name: Modificar archivo dir.conf para que use index.php primero
+      replace:
+        path: /etc/apache2/mods-enabled/dir.conf
+        regexp: 'DirectoryIndex (.*)$'
+        replace: 'DirectoryIndex index.php \1'
+
+    - name: Copiar página en apache2
+      copy:
+        src: /home/devasc/Downloads/Practica1-Laboratorio/
+        dest: /var/www/html/
+        owner: www-data
+        group: www-data
+        mode: 0750
+
+    # Importando aplicación en app.magalyrojas.com
+    - name: Crear carpeta del sitio web
+      file:
+        path: /var/www/irojas.com
+        state: directory
+
+    - name: Copiar página a la carpeta creada
+      copy:
+        src: /home/devasc/Downloads/TallerBaseDatos/
+        dest: /var/www/irojas.com
+        owner: www-data
+        group: www-data
+        mode: 0750
+
+    - name: Crear archivo de configuración
+      file:
+        path: /etc/apache2/sites-available/irojas.com.conf
+        state: touch
+        mode: 0750
+
+    - name: Escribir configuración en el archivo
+      copy:
+        dest: /etc/apache2/sites-available/irojas.com.conf
+        content: |
+          <VirtualHost *:80>
+            ServerName irojas.com
+            ServerAlias app.magalyrojas.com
+            DocumentRoot /var/www/irojas.com
+            ErrorLog ${APACHE_LOG_DIR}/error.log
+            CustomLog ${APACHE_LOG_DIR}/access.log combined
+          </VirtualHost>
+
+    - name: Activar el archivo de configuración
+      shell: a2ensite irojas.com.conf
+
+    - name: Reiniciar el servidor de apache
+      shell: systemctl restart apache2
+
+    # Configurando el tráfico de datos para el puerto 80
+    - name: Permitir el tráfico HTTP en el puerto 80
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 80
+        jump: ACCEPT
+
+    # Eliminando cuentas anónimas y base de prueba
+    - name: Eliminar cuentas anónimas
+      mysql_db:
+        login_user: 'root'
+        login_password: '1234'
+        login_host: localhost
+        name: ""
+        state: absent
+      become: true
+      become_user: root
+
+    - name: Eliminar base de datos de pruebas
+      mysql_db:
+        login_user: root
+        login_password: '1234'
+        login_host: localhost
+        name: test
+        state: absent
+      become: true
+      become_user: root
